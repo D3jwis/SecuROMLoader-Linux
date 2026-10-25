@@ -4,7 +4,7 @@
 
 HMODULE version_dll;
 
-#define WRAPPER_FUNC(name) o##name = GetProcAddress(version_dll, ###name)
+#define WRAPPER_FUNC(name) o##name = GetProcAddress(version_dll, #name)
 
 #ifdef _M_AMD64
 #pragma warning (disable: 4081)
@@ -20,7 +20,7 @@ HMODULE version_dll;
 #else
 #define WRAPPER_GENFUNC(name) \
 	FARPROC o##name; \
-	__declspec(naked) void _##name() \
+	extern "C" __declspec(naked) void _##name() \
 	{ \
 		__asm jmp[o##name] \
 	}

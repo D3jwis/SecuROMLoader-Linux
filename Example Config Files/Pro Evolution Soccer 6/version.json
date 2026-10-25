@@ -1,0 +1,12 @@
+{
+  "exeFile": "PES6.exe",
+  "logging": false,
+  "logFile": "version.log.txt",
+  "logCreateFile": true,
+  "CDROMDriveLetter": "D",
+  "CDROMVolumeName": "PRO EVOLUTION SOCCER 6",
+  "UseVirusekMethod": true,
+  "CPUCount": 1,
+  "pauseOnLog": false,
+  "logConsole": false
+}

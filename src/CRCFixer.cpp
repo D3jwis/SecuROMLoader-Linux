@@ -1,4 +1,4 @@
-#include <Windows.h>
+#include <windows.h>
 #include "Utils.h"
 #include "NString.h"
 #include "CRCFixer.h"
@@ -80,39 +80,41 @@ void ReversePatches()
 
 int GeometryCheckCount = 0;
 bool GeometryCheckOneToZero = false;
+struct GeometryRegisters
+{
+    DWORD edi, esi, ebp, esp, ebx, edx, ecx, eax;
+};
+
+static void __cdecl GeometryHookImpl(GeometryRegisters* saved)
+{
+    logc(FOREGROUND_GREEN, "Geometry Hook Called: %d\n", GeometryCheckCount);
+    const bool zero = GeometryCheckCount == 0 ||
+        (GeometryCheckOneToZero && GeometryCheckCount == 1);
+    ++GeometryCheckCount;
+    saved->eax = (saved->eax & ~0xFF00u) | (zero ? 0u : 0x100u);
+    if (GeometryCheckCount == 4)
+    {
+        logc(FOREGROUND_ORANGE, "Reversing CRC Fixer patches now...\n");
+        ReversePatches();
+        GetKey(true);
+        // PUSHAD saved ESP after PUSHFD: the caller return address is four bytes above it.
+        *reinterpret_cast<DWORD*>(saved->esp + sizeof(DWORD)) += 3;
+    }
+}
+
 __declspec(naked) void GeometryHook()
 {
-	__asm pushad;
-	logc(FOREGROUND_GREEN, "Geometry Hook Called: %d\n", GeometryCheckCount);
-	__asm popad;
-	if (GeometryCheckCount == 0 || (GeometryCheckOneToZero && GeometryCheckCount == 1))
-	{
-		__asm 
-		{
-			inc [GeometryCheckCount]
-			mov ah, 0
-			//ret
-		}
-	}
-	else
-	{
-		__asm
-		{
-			inc [GeometryCheckCount]
-			mov ah, 1
-			//ret
-		}
-	}
-	if (GeometryCheckCount == 4)		// Securom 8 seems to do 4 geometry checks and checks for changes?
-	{
-		__asm pushad;
-		logc(FOREGROUND_ORANGE, "Reversing CRC Fixer patches now...\n");
-		ReversePatches();
-		GetKey(true);
-		__asm popad;
-		__asm add dword ptr [esp], 3  // jump back to the test ah,5
-	}
-	__asm ret;
+    __asm {
+        pushfd
+        pushad
+        mov eax, esp
+        push eax
+        call GeometryHookImpl
+        add esp, 4
+        popad
+        popfd
+        ret
+    }
 }
 
 

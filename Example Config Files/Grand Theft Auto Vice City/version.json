@@ -1,11 +1,14 @@
 {
-	"exefile": "gta-vc.exe"
-	"logging": false,
-	"logfile": "version.log.txt",
-	"logCreatefile": true,
-	"CDRomDriveLetter": "L",
-	"fileMappings": [
-	{"source": "L:\\*", "target": ".\\*"}
-	],
-	"CPUCount": 1
+  "exeFile": "gta-vc.exe",
+  "logging": false,
+  "logFile": "version.log.txt",
+  "logCreateFile": true,
+  "CDROMDriveLetter": "L",
+  "fileMappings": [
+    {
+      "source": "L:\\*",
+      "target": ".\\*"
+    }
+  ],
+  "CPUCount": 1
 }

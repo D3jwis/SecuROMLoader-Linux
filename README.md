@@ -1,58 +1,166 @@
-# SecuROMLoader
-Allows playing SecuROM games (versions 4,5,6 and 7 (and now some 8!)) on Modern Windows without the need of the CD/DVD
+# SecuROMLoader-Linux
 
-# Download
-[Releases](https://github.com/nckstwrt/SecuROMLoader/releases)
+A fork of [nckstwrt/SecuROMLoader](https://github.com/nckstwrt/SecuROMLoader)
+with Wine/Proton compatibility fixes, a Linux build script, and a tested PES 6 configuration.
 
-## Usage
-SecuROMLoader is primarily just "version.dll". For any newer game you can just place version.dll in the same directory as the game's main executable and the game can then be run normally. It will then automatically use version.dll without any further changes required to bypass SecuROM.
+The output is a **32-bit Windows `version.dll` loaded by Wine/Proton**. It is not a
+native Linux executable. Use it with games you own. The upstream GPL-3.0 license
+and third-party credits are retained.
 
-## Configuration
-SecuROMLoader can be configured to bypass additional CD/DVD checks and log lots of debug information.  
-Find out more here: [Example Config Files](https://github.com/nckstwrt/SecuROMLoader/tree/master/Example%20Config%20Files)
+## Compatibility
 
-## Credits
-* ELF_7719116 - The mastermind behind unveiling SecuROM and describing the technique used to NoCD SecuROM 7 (as described in TIBERIUMNUY_REVERSING__FULL_PUBLIC_VERSION_1.3.pdf)
-* [version-proxy](https://github.com/BitCrackers/version-proxy) from BitCrackers for proxying the Windows version.dll code and approach
-* [MinHooks](https://github.com/TsudaKageyu/minhook) for API Hooking
-* SecuROM v3, v4, v5 approach by me
+| Target | Status in this fork |
+| --- | --- |
+| Pro Evolution Soccer 6, with the user's official update from PES6PATCH media | Confirmed running on Linux with CachyOS Proton on 2026-10-25 |
+| Other 32-bit SecuROM games | Configuration guidance provided; not retested with this fork |
+| Windows | Not tested after these changes |
+| 64-bit games | Not supported by the supplied Linux build script |
 
-## Tested and Working Games + Versions
-* Skylanders: Spyro's Adventure - v8.03.0012
-* Crysis - v7.34.0014
-* Command and Conquer 3 (v1.9) - v7.33.0017
-* Prototype - v7.39.0006
-* Pro Evolution Soccer 3 - v4.85.04
-* Magic The Gathering - Battlegrounds - v4.85.07
-* Counterstrike - Condition Zero - v5.00.03 (May need to use VersionInjector (or just rename the exe))
-* Grand Theft Auto - Vice City 1.0 - v4.84.69
-* Grand Theft Auto - Vice City 1.1 - v4.84.75
-* Manhunt - v5.03.03
-* Max Payne 2 v1.01 - v4.85.07 - Needs SafeSEH turned off in the exe manually (log file will tell you how)
-* Football Manager 2008 - v7.34.0013 (has SafeSEH but works anyway)
-* Driv3r - v5.03.13
-* X-2 The Threat - v5.00.03
-* Sid Meier's Pirates! - v5.03.06 - This is the most interesting one! Far more obfuscation than the versions below or above it! Needed a separate approach
-* Football Manager 2008 - v7.34.0013
-* Diablo 2 - v3.17.00
-* Diablo 2 - Lord of Destruction - v4.47.00
-* Gunman Chronicles - v4.16.00
-* Homeworld Cataclysm - v4.08.00 - (May need to use VersionInjector)
-* Kohan Ahrimans Gift v1.37 - v4.84.63
-* Jurassic Park Operation Genesis - v4.84.64
-* Chronicles of Riddick Escape from Butcher Bay - v5.03.09
-* Spellforce - The Order of Dawn v1.11 - v5.00.03
-* Spellforce - The Breath Of Winter - v5.03.04
+Upstream targets several SecuROM generations, including versions 3–8. See the
+[original upstream compatibility list and credits](docs/UPSTREAM.md); that list
+is historical upstream evidence, not a list of games verified with this fork.
+Different regional releases and official patches can behave differently.
 
-## virusek's SecuROM 7/8 Methodology
-virusek released a generic SecuROM 7 and 8 loader ([Original cs.rin.ru post](https://cs.rin.ru/forum/viewtopic.php?p=912641#p912641)). SecuROMLoader now has this methodology built-in which can be turned on from utilising version.json (See [Example Configs](https://github.com/nckstwrt/SecuROMLoader/tree/master/Example%20Config%20Files))
+## Build on Linux
 
-## Background
-After writing  [SafeDiscLoader2](https://github.com/nckstwrt/SafeDiscLoader2) I was interested in creating the same for SecuROM as these were the two big CD/DVD protections before Internet Activation took over (as it did even for SecuROM 8). ELF described how you can bypass the protection in SecuROM 7 so I wanted to implement a generic way of doing the same for every version I could find.
+You need Bash and an **LLVM-MinGW toolchain with the i686 Clang compiler**.
+Download and extract a Linux-hosted toolchain from the
+[official LLVM-MinGW releases](https://github.com/mstorsjo/llvm-mingw/releases).
+This fork was built with the UCRT toolchain release `20261020`.
+A regular Linux `clang++` without the Windows headers/libraries is insufficient.
 
- ## Notices
-> [!IMPORTANT]
-> This is not intended for Piracy but for users to exercise their Fair Use rights for the games they actually own and can no longer play due to draconian and unsupported copy protection
+```bash
+cd /path/to/SecuROMLoader-Linux
+LLVM_MINGW=/absolute/path/to/extracted/llvm-mingw ./build-linux.sh
+```
 
-> [!CAUTION]
-> Antivirus software that blocks code injection could block this dll or loader, so make sure to greenlist the included exe and dll or disable your antivirus software if required.
+The result is `build/version.dll`. Alternatively, put
+`i686-w64-mingw32-clang++` on `PATH` and run `./build-linux.sh`.
+The build script does not install anything into a game or download a toolchain.
+
+## Install and launch
+
+1. Close the game. Back up any existing `version.dll` and `version.json` in its folder.
+2. Copy `build/version.dll` next to the game's main `.exe`. If the game already uses
+   a different `version.dll` mod, resolve that conflict before replacing it.
+3. Put `version.json` in the same folder. Start with the configuration for your game.
+4. Set `WINEDLLOVERRIDES=version=n,b` in the game's launcher.
+5. Set the working directory to the folder containing the executable and `version.json`.
+   Launch the original game executable normally.
+
+`n,b` tells Wine to try the local Windows DLL before its built-in implementation.
+If an override string already exists, preserve its other entries, for example
+`dinput8=n,b;version=n,b`. See the [Wine manual](https://man.archlinux.org/man/wine.1.en#WINEDLLOVERRIDES).
+
+### Heroic
+
+Open the game's settings and add an environment variable:
+
+| Name | Value |
+| --- | --- |
+| `WINEDLLOVERRIDES` | `version=n,b` |
+
+Select the existing prefix where the game is installed, use the game's main EXE,
+and launch it from Heroic. Menu labels can vary by Heroic version.
+
+### Steam / Proton
+
+Add this to the game's launch options:
+
+```text
+WINEDLLOVERRIDES="version=n,b" %command%
+```
+
+For a non-Steam shortcut, set **Start In** to the executable's directory and enable
+Proton in the shortcut's compatibility settings.
+
+### Plain Wine
+
+Use the same Wine runner and prefix that the game was installed with:
+
+```bash
+cd '/path/to/game'
+WINEPREFIX='/path/to/existing-prefix' WINEDLLOVERRIDES='version=n,b' wine './Game.exe'
+```
+
+## PES 6
+
+Copy the supplied [PES 6 configuration](Example%20Config%20Files/Pro%20Evolution%20Soccer%206/version.json)
+next to `PES6.exe`, alongside the rebuilt `version.dll`.
+
+The essential tested settings are:
+
+```json
+{
+  "UseVirusekMethod": true,
+  "CDROMDriveLetter": "D",
+  "CDROMVolumeName": "PRO EVOLUTION SOCCER 6",
+  "CPUCount": 1,
+  "logging": false,
+  "logConsole": false,
+  "pauseOnLog": false
+}
+```
+
+Keep `WINEDLLOVERRIDES=version=n,b` enabled. The game executable does not need to
+be edited or replaced. The standard loader method still gave a wrong-disc message
+in our tests; use the alternative method above for this tested PES 6 setup.
+
+See [the full PES 6 guide](PES6-WINE.md) for installation, optional disc mapping,
+diagnostics, and the exact limits of the successful test.
+
+## Other SecuROM games
+
+Start with the standard loader method:
+
+```json
+{
+  "UseVirusekMethod": false,
+  "logging": false,
+  "pauseOnLog": false,
+  "logConsole": false
+}
+```
+
+For a SecuROM 7/8 game that fails with that method, try `UseVirusekMethod: true`.
+This alternative is not intended for SecuROM 3/4/5. Change one setting at a time;
+PES 6's drive label and CPU limit are not universal settings for other games.
+
+See [the general usage and configuration guide](docs/USAGE.md), including
+file mappings, real disc images, troubleshooting, and rollback.
+The [example configurations](Example%20Config%20Files) are starting points, not
+additional games verified with this fork.
+
+## Changes from upstream
+
+- Apply the same file mapping and disc-device handling through Kernel32 and KernelBase.
+- Prevent recursive logging when console output calls hooked Windows APIs.
+- Allow file-only diagnostics (`logConsole`) and disable keyboard pauses (`pauseOnLog`).
+- Bound a table-of-contents copy that previously read beyond its 20-byte source.
+- Add opt-in read-only SCSI responses from a user's cooked ISO9660 disc image.
+- Add Clang/SDK portability fixes and a Linux build script for the 32-bit DLL.
+
+The successful PES 6 test followed several changes together. Their individual
+necessity has not been isolated. In particular, the successful alternative-method
+trace did not issue image-reader SCSI commands, so `DiscImage` is not established
+as necessary for that successful launch.
+
+## Validation
+
+- The Linux build script completed successfully.
+- PES 6 reached the game and was confirmed working by the user.
+- Nine isolated Wine/Proton API checks passed, covering both file-open paths,
+  image sector contents, capacity, TOC boundaries, and invalid reads.
+
+See [test instructions](tests/README.md). The probe tests loader APIs and memory
+boundaries; it does not establish compatibility with additional games.
+
+## Credits and license
+
+Original loader: [nckstwrt](https://github.com/nckstwrt/SecuROMLoader).
+The Wine/Proton changes in this fork were developed and tested with assistance
+from OpenAI Codex. Existing upstream and third-party authorship is retained.
+
+Thanks to ELF_7719116, virusek, BitCrackers/version-proxy, and TsudaKageyu/MinHook.
+See [upstream credits](docs/UPSTREAM.md#credits), [LICENSE](LICENSE), and the
+[MinHook license](src/minhook/LICENSE.txt).

@@ -3,9 +3,17 @@
 #include <stdio.h>
 #include <conio.h>
 #include "Utils.h"
+#include "Config.h"
+extern Config config;
 
 FILE* log_file = NULL;
 bool loggingEnabled = false;
+static thread_local bool logInProgress = false;
+struct LogScope
+{
+    LogScope() { logInProgress = true; }
+    ~LogScope() { logInProgress = false; }
+};
 CRITICAL_SECTION log_critical_section;
 
 void SetLogging(bool enable, const char* logFileName)
@@ -21,8 +29,9 @@ void SetLogging(bool enable, const char* logFileName)
 
 void logc(WORD col, const char* fmt, ...)
 {
-	if (!loggingEnabled || fmt == NULL)
+	if (!loggingEnabled || fmt == NULL || logInProgress)
 		return;
+    LogScope scope;
 	EnterCriticalSection(&log_critical_section);
 	va_list va;
 	if (log_file)
@@ -33,7 +42,7 @@ void logc(WORD col, const char* fmt, ...)
 		fflush(log_file);
 	}
 
-	if (stdout)
+	if (stdout && config.GetBool("logConsole", true))
 	{
 		HANDLE hConsole = CreateFileA("CONOUT$", GENERIC_WRITE | GENERIC_READ, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
 		DWORD mode = 0;
@@ -101,7 +110,7 @@ void logc(WORD col, const char* fmt, ...)
 		CloseHandle(hConsole);
 	}
 	/*
-	if (stdout)
+	if (stdout && config.GetBool("logConsole", true))
 	{
 		//HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -130,8 +139,9 @@ void logc(WORD col, const char* fmt, ...)
 
 void log(const char* fmt, ...)
 {
-	if (!loggingEnabled || fmt == NULL)
+	if (!loggingEnabled || fmt == NULL || logInProgress)
 		return;
+    LogScope scope;
 	EnterCriticalSection(&log_critical_section);
 	va_list va;
 	if (log_file)
@@ -141,7 +151,7 @@ void log(const char* fmt, ...)
 		va_end(va);
 		fflush(log_file);
 	}
-	if (stdout)
+	if (stdout && config.GetBool("logConsole", true))
 	{
 		va_start(va, fmt);
 		vfprintf(stdout, fmt, va);
@@ -603,7 +613,7 @@ BOOL bFirstGetch = TRUE;
 char GetKey(bool bForce)
 {
 	char ret = 0;
-	if (loggingEnabled && (bFirstGetch || bForce))
+	if (loggingEnabled && config.GetBool("pauseOnLog", true) && (bFirstGetch || bForce))
 	{
 		while (_kbhit()) 
 			_getch(); // discard

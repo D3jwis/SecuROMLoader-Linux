@@ -134,47 +134,42 @@ BOOL WINAPI GetVolumeInformationA_Hook(LPCSTR lpRootPathName, LPSTR lpVolumeName
 	return ret;
 }
 
+static std::string MapCreateFilePath(LPCSTR path)
+{
+    if (!path) return {};
+    std::string mapped = config.GetFileMapping(path);
+    if (CDROMDriveLetter && CDROMDriveLetter[0])
+    {
+        std::string device = "\\\\.\\";
+        device += static_cast<char>(toupper(CDROMDriveLetter[0]));
+        device += ':';
+        if (_stricmp(mapped.c_str(), device.c_str()) == 0)
+        {
+            log("Redirecting CDROM device %s to NUL\n", mapped.c_str());
+            return "NUL";
+        }
+    }
+    return mapped;
+}
+
 HANDLE WINAPI CreateFileA_Hook(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
 {
-	std::string strFileName;
-	if (lpFileName)
-	{
-		strFileName = config.GetFileMapping(lpFileName);
-		lpFileName = strFileName.c_str();
-	}
-
-	if (CDROMDriveLetter)
-	{
-		NString drivePath = NString::Format("\\\\.\\%c:", toupper(CDROMDriveLetter[0]));
-		NString FileNameUpper = NString(lpFileName).ToUpper();
-		if (drivePath == FileNameUpper)
-		{
-			logc(FOREGROUND_LIME, "Redirecting CreateFileA of CDROM drive %s to NUL device\n", (LPCSTR)drivePath);
-			lpFileName = "NUL";
-		}
-	}
-	HANDLE ret = CreateFileA_Orig(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-
-	if (logCreateFile && lpFileName && _stricmp(lpFileName, "CONOUT$") != 0)
-		log("CreateFileA_Hook Hook - lpFileName: %s ret: %08X\n", lpFileName == NULL ? "!NULL!" : lpFileName, ret);
-
-	return ret;
+    const std::string mapped = MapCreateFilePath(lpFileName);
+    const char* path = lpFileName ? mapped.c_str() : nullptr;
+    HANDLE ret = CreateFileA_Orig(path, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    if (logCreateFile && path && _stricmp(path, "CONOUT$") != 0)
+        log("CreateFileA_Hook: %s -> %s ret: %08X\n", lpFileName, path, ret);
+    return ret;
 }
 
 HANDLE WINAPI CreateFileA_Hook_KBase(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
 {
-	std::string strFileName;
-	if (lpFileName)
-	{
-		strFileName = config.GetFileMapping(lpFileName);
-		lpFileName = strFileName.c_str();
-	}
-	HANDLE ret = CreateFileA_Orig_KBase(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-
-	if (logCreateFile && lpFileName && _stricmp(lpFileName, "CONOUT$") != 0)
-		log("CreateFileA_Hook_KBase Hook - lpFileName: %s ret: %08X\n", lpFileName == NULL ? "!NULL!" : lpFileName, ret);
-
-	return ret;
+    const std::string mapped = MapCreateFilePath(lpFileName);
+    const char* path = lpFileName ? mapped.c_str() : nullptr;
+    HANDLE ret = CreateFileA_Orig_KBase(path, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    if (logCreateFile && path && _stricmp(path, "CONOUT$") != 0)
+        log("CreateFileA_Hook_KBase: %s -> %s ret: %08X\n", lpFileName, path, ret);
+    return ret;
 }
 
 DWORD WINAPI GetFileAttributesA_Hook(LPCSTR lpFileName)
@@ -415,8 +410,11 @@ void SecuROMLoader(HMODULE hModule)
 
 	if (config.GetBool("logging"))
 	{
-		CreateConsole();
-		HideConsoleCursor();
+		if (config.GetBool("logConsole", true))
+        {
+            CreateConsole();
+            HideConsoleCursor();
+        }
 		NString logFile = config.GetValue("logFile");
 		SetLogging(true, logFile.IsEmpty() ? NULL : (LPCSTR)logFile.Replace("ProcessID", NString::Format("%d", GetCurrentProcessId())));
 		logCreateFile = config.GetBool("logCreateFile");

@@ -3,6 +3,9 @@
 #include <winternl.h>
 #include <ntddscsi.h>
 #include <map>
+#include <algorithm>
+#include <cstdio>
+#include <cstdint>
 #include "IOCTLCodes.h"
 #include "Config.h"
 #include "NString.h"
@@ -18,9 +21,105 @@ extern Config config;
 extern NtDeviceIoControlFile_typedef NtDeviceIoControlFile_Orig;
 void PrintCdbCommand(const BYTE* cdb, UCHAR cdbLen);
 
-BYTE *TOC = hexstring("0012010100140100000000000014AA000028FDD0");
+static const BYTE TOC[] = {0x00,0x12,0x01,0x01,0x00,0x14,0x01,0x00,0,0,0,0,0,0x14,0xAA,0,0x00,0x28,0xFD,0xD0};
 int TOCCount = 0;
 bool flip7C0 = true;
+
+// DiscImage is an optional user-provided, cooked 2048-byte-sector ISO/MDF.
+// Serve real sectors instead of unrelated hard-coded PVD and geometry bytes.
+static void StoreBE32(BYTE* output, DWORD value)
+{
+    output[0] = static_cast<BYTE>(value >> 24);
+    output[1] = static_cast<BYTE>(value >> 16);
+    output[2] = static_cast<BYTE>(value >> 8);
+    output[3] = static_cast<BYTE>(value);
+}
+
+static bool HandleDiscImage(SCSI_PASS_THROUGH_DIRECT* request, PIO_STATUS_BLOCK result,
+                            ULONG outputLength, NTSTATUS* status)
+{
+    const char* path = config.GetValue("DiscImage");
+    if (!path || !*path) return false;
+    const BYTE command = request->Cdb[0];
+    if (command != 0x28 && command != 0x25 && command != 0x43) return false;
+    *status = STATUS_UNSUCCESSFUL;
+    result->Status = *status;
+    result->Information = 0;
+    request->ScsiStatus = 2;
+    FILE* image = fopen(path, "rb");
+    if (!image) { log("DiscImage: cannot open %s\n", path); return true; }
+    BYTE descriptor[7] = {};
+    bool valid = _fseeki64(image, 16LL * 2048, SEEK_SET) == 0 &&
+        fread(descriptor, 1, sizeof(descriptor), image) == sizeof(descriptor) &&
+        descriptor[0] == 1 && memcmp(descriptor + 1, "CD001", 5) == 0 && descriptor[6] == 1;
+    valid = valid && _fseeki64(image, 0, SEEK_END) == 0;
+    const int64_t size = valid ? _ftelli64(image) : -1;
+    if (size < 17LL * 2048 || size % 2048 != 0 || size / 2048 > UINT32_MAX ||
+        !request->DataBuffer || request->CdbLength < 10 || request->DataIn != SCSI_IOCTL_DATA_IN)
+    {
+        log("DiscImage: expected readable ISO9660 image with 2048-byte sectors\n");
+        fclose(image); return true;
+    }
+    const DWORD sectors = static_cast<DWORD>(size / 2048);
+    BYTE* buffer = static_cast<BYTE*>(request->DataBuffer);
+    DWORD transferred = 0;
+    if (command == 0x28)
+    {
+        const DWORD lba = (DWORD(request->Cdb[2]) << 24) | (DWORD(request->Cdb[3]) << 16) |
+                          (DWORD(request->Cdb[4]) << 8) | DWORD(request->Cdb[5]);
+        const DWORD blocks = (DWORD(request->Cdb[7]) << 8) | DWORD(request->Cdb[8]);
+        const uint64_t bytes = uint64_t(blocks) * 2048;
+        valid = uint64_t(lba) + blocks <= sectors && bytes <= request->DataTransferLength;
+        valid = valid && _fseeki64(image, int64_t(lba) * 2048, SEEK_SET) == 0;
+        valid = valid && fread(buffer, 1, static_cast<size_t>(bytes), image) == bytes;
+        if (valid) transferred = static_cast<DWORD>(bytes);
+        log("DiscImage: READ(10) LBA=%u blocks=%u %s\n", lba, blocks, valid ? "OK" : "FAILED");
+    }
+    else if (command == 0x25)
+    {
+        valid = request->DataTransferLength >= 8;
+        if (valid) { StoreBE32(buffer, sectors - 1); StoreBE32(buffer + 4, 2048); transferred = 8; }
+        log("DiscImage: READ CAPACITY sectors=%u\n", sectors);
+    }
+    else
+    {
+        // Single-session, single data track. Format 0 supports LBA and MSF addresses.
+        valid = (request->Cdb[2] & 0x0F) == 0 &&
+            (request->Cdb[6] == 0 || request->Cdb[6] == 1 || request->Cdb[6] == 0xAA);
+        BYTE toc[20] = {0,0x12,1,1,0,0x14,1,0,0,0,0,0,0,0x14,0xAA,0,0,0,0,0};
+        if (valid)
+        {
+            if (request->Cdb[1] & 2)
+            {
+                toc[10] = 2;
+                const DWORD frames = sectors + 150;
+                toc[17] = static_cast<BYTE>(frames / (60 * 75));
+                toc[18] = static_cast<BYTE>((frames / 75) % 60);
+                toc[19] = static_cast<BYTE>(frames % 75);
+            }
+            else StoreBE32(toc + 16, sectors);
+            DWORD length = sizeof(toc);
+            if (request->Cdb[6] == 0xAA)
+            {
+                memmove(toc + 4, toc + 12, 8); toc[1] = 0x0A; length = 12;
+            }
+            const DWORD allocation = (DWORD(request->Cdb[7]) << 8) | request->Cdb[8];
+            transferred = (std::min)(length, (std::min)(allocation, request->DataTransferLength));
+            memcpy(buffer, toc, transferred);
+        }
+        log("DiscImage: READ TOC %s\n", valid ? "OK" : "FAILED");
+    }
+    fclose(image);
+    if (valid)
+    {
+        request->ScsiStatus = 0;
+        request->DataTransferLength = transferred;
+        *status = STATUS_SUCCESS;
+        result->Status = *status;
+        result->Information = (std::min)(outputLength, static_cast<ULONG>(sizeof(*request)));
+    }
+    return true;
+}
 
 NTSTATUS NTAPI NtDeviceIoControlFile_Hook(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength)
 {
@@ -64,6 +163,9 @@ NTSTATUS NTAPI NtDeviceIoControlFile_Hook(HANDLE FileHandle, HANDLE Event, PIO_A
 		if (InputBuffer && InputBufferLength >= sizeof(SCSI_PASS_THROUGH_DIRECT)) 
 		{
 			SCSI_PASS_THROUGH_DIRECT* sptd = (SCSI_PASS_THROUGH_DIRECT*)InputBuffer;
+            NTSTATUS imageStatus;
+            if (HandleDiscImage(sptd, IoStatusBlock, OutputBufferLength, &imageStatus)) return imageStatus;
+
 
 			logc(FOREGROUND_BROWN, "DataTransferLength: %u\n", sptd->DataTransferLength);
 
@@ -103,7 +205,10 @@ NTSTATUS NTAPI NtDeviceIoControlFile_Hook(HANDLE FileHandle, HANDLE Event, PIO_A
 				else
 				{
 					logc(FOREGROUND_RED, "Faking %s response\n", sptd->Cdb[0] == 0x12 ? "INQUIRY" : "READ TOC/PMA/ATIP");
-					memcpy(sptd->DataBuffer, TOC, sptd->DataTransferLength);
+					if (!sptd->DataBuffer) return STATUS_UNSUCCESSFUL;
+                    memset(sptd->DataBuffer, 0, sptd->DataTransferLength);
+                    memcpy(sptd->DataBuffer, TOC, (std::min)(sizeof(TOC), static_cast<size_t>(sptd->DataTransferLength)));
+                    sptd->ScsiStatus = 0;
 					IoStatusBlock->Status = STATUS_SUCCESS;
 					return STATUS_SUCCESS;
 				}

@@ -352,3 +352,9 @@ MigrationBackup/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+
+# Linux build outputs and local diagnostics
+/build/
+/probe-results.txt
+/probe.log
+/version.log.txt
